@@ -17,13 +17,28 @@ The pipeline ingests raw export files (`.xlsx`, `.xls`, `.csv`), performs intell
 
 ```text
 .
-├── input/                             # Place raw incoming export files (.xlsx, .xls, .csv) here
-├── output/                            # Generated normalized CSV and Excel files
+├── app.py                             # Desktop application entry point (PySide6 / Qt6)
+├── config.py                          # Local database configuration & persistence
+├── database.py                        # SQLite schema, queries, cascade deletions & CRUD
+├── core_logic.py                      # Data extraction, subject regex parsing, department resolver
+├── import_export.py                   # Importer (CSV/Excel) and Exporters (CSV, Excel, PDF)
 ├── mappings.py                        # Output schemas, default values, and department mappings
-├── script.py                          # Core extraction, normalization, and export logic
-├── requirements.txt                   # Project dependencies
-├── .gitignore                         # Git ignore rules (excludes data files and virtual envs)
-└── README.md                          # Project documentation
+├── script.py                          # Standalone CLI batch extractor
+├── requirements.txt                   # Project dependencies (PySide6, reportlab, pandas, openpyxl)
+├── .gitignore                         # Excludes data files, virtual envs, and pycache
+├── README.md                          # Project documentation
+├── input/                             # Place raw incoming export files here
+├── output/                            # Generated normalized output files
+└── ui/                                # Desktop graphical user interface
+    ├── main_window.py                 # Main dashboard, search/filter controls, table view
+    ├── table_model.py                 # QAbstractTableModel for fast tabular rendering
+    ├── action_delegate.py             # Custom delegate for three-dot (⋮) Actions menu
+    └── dialogs/
+        ├── db_location_dialog.py      # Dialog to configure/change database storage folder
+        ├── representation_dialog.py   # Dialog to Add/Edit representations & departments
+        ├── atr_dialog.py              # Dialog for ATR management and status recalculation
+        ├── import_dialog.py           # Background import dialog with progress and summary
+        └── export_dialog.py           # Export dialog for CSV, Excel (.xlsx), and PDF
 ```
 
 ---
@@ -121,14 +136,39 @@ pip install -r requirements.txt
 
 ---
 
-## Usage
+## Running the Application
 
-1. **Place Raw Input Files**: Copy one or more `.xlsx`, `.xls`, or `.csv` export files into the `input/` folder.
-2. **Execute Pipeline**:
-   ```bash
-   python script.py
-   ```
-3. **Retrieve Generated Output**: Processed outputs are saved to `output/`:
-   - `output/Representations.csv`
-   - `output/Concerned Departments.csv`
-   - `output/Representations_and_Departments.xlsx`
+### Option A: Desktop Application (GUI)
+
+Launch the standalone desktop application with:
+
+```bash
+python app.py
+```
+
+#### Key Desktop App Features:
+- **Local Database Setup**: On initial launch, prompts you to choose the folder where `rmc_grievances.db` is stored. You can change this location at any time from the dashboard.
+- **Interactive Dashboard**: Full-text search and dropdown filters (Communication Number, Issue Type, Concerned Department, ATR Status).
+- **Actions Menu (`⋮`)**:
+  - **ATR Management**: View, add, and update Action Taken Reports (Status, Number, Date, Computer Number, Location) for each concerned department, with automatic recalculation of the parent representation's **Overall ATR Status**.
+  - **Edit Representation**: Edit communication details, applicant info, remarks, and modify associated departments in a sub-table.
+  - **Quick Update**: Save updates directly.
+  - **Delete Record**: Safely delete a representation with confirmation and automatic cascade removal of child departments.
+- **Import Data**: Select any `.xlsx`, `.xls`, or `.csv` file. Runs in a background thread with progress indicator and detailed import summary.
+- **Export Data**: Export all or filtered records to **Excel (`.xlsx`)**, **CSV**, or **PDF** (multi-page landscape report).
+
+---
+
+### Option B: Command-Line Pipeline (CLI)
+
+Run the automated batch extraction pipeline directly:
+
+```bash
+python script.py
+```
+
+Outputs will be generated in `output/`:
+- `output/Representations.csv`
+- `output/Concerned Departments.csv`
+- `output/Representations_and_Departments.xlsx`
+

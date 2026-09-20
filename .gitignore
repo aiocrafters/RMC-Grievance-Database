@@ -15,6 +15,10 @@ ENV/
 *.xlsx
 *.xls
 *.csv
+*.db
+*.sqlite
+*.sqlite3
+app_config.json
 ~$*
 
 # Environment and IDE
