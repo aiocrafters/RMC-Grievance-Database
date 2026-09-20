@@ -22,7 +22,7 @@ A standalone Python desktop application for grievance data extraction, normaliza
 
 ---
 
-## How to Run
+## How to Run (Development Mode)
 
 ### From the Project Root:
 ```bash
@@ -59,3 +59,64 @@ Desktop Application/
         ├── import_dialog.py           # Background import dialog with progress and summary
         └── export_dialog.py           # Export dialog for CSV, Excel (.xlsx), and PDF
 ```
+
+---
+
+## Packaging into a Standalone Windows Executable (.exe)
+
+You can package this application into a standalone `.exe` so that **other Windows computers can run it without installing Python, pip, or any dependencies**.
+
+### Step 1: Install PyInstaller
+
+Run the install command using `python -m pip`:
+
+```bash
+# If using the project's virtual environment (recommended):
+.\.venv\Scripts\activate
+python -m pip install pyinstaller
+
+# Or globally:
+python -m pip install pyinstaller
+```
+
+> [!NOTE]
+> Always run `python -m pip install` and `python -m PyInstaller` on Windows. This prevents the common PowerShell error:  
+> *`pyinstaller : The term 'pyinstaller' is not recognized as the name of a cmdlet`* when Python's `Scripts` directory is not in your system's `PATH`.
+
+---
+
+### Step 2: Build the Standalone Application
+
+Navigate into the `Desktop Application` directory and run:
+
+```bash
+cd "Desktop Application"
+python -m PyInstaller --noconsole --name "RMC_Grievance_App" --add-data "mappings.py;." app.py
+```
+
+*Or from the root directory:*
+
+```bash
+python -m PyInstaller --noconsole --name "RMC_Grievance_App" --add-data "Desktop Application/mappings.py;." "Desktop Application/app.py"
+```
+
+#### Explanation of Flags:
+- `--noconsole`: Suppresses the black command prompt terminal window, launching only the clean graphical desktop window.
+- `--name "RMC_Grievance_App"`: Sets the name of the executable to `RMC_Grievance_App.exe`.
+- `--add-data "mappings.py;."`: Bundles the department mapping configurations and schema definitions directly into the application bundle.
+- *(Optional)* `--onefile`: Add this flag if you want a single portable `.exe` file instead of a distribution folder:
+  ```bash
+  python -m PyInstaller --noconsole --onefile --name "RMC_Grievance_App" --add-data "mappings.py;." app.py
+  ```
+
+---
+
+### Step 3: Locate & Distribute the Application
+
+Once the build finishes:
+1. Open the generated `dist/` directory:
+   - **Folder build**: `dist/RMC_Grievance_App/` (contains `RMC_Grievance_App.exe` and necessary runtime DLLs).
+   - **Single-file build**: `dist/RMC_Grievance_App.exe`.
+2. **Distribute to other computers**:
+   - Zip the `dist/RMC_Grievance_App` folder (or copy `RMC_Grievance_App.exe` if built with `--onefile`) and send it to any Windows 10 or Windows 11 computer.
+   - **No Python setup needed**: The end user can simply double-click `RMC_Grievance_App.exe` to run the application immediately.
