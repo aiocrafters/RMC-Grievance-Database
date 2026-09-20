@@ -18,11 +18,12 @@ REPRESENTATIONS_COLUMNS = [
     "Letter Number",
     "Letter Date",
     "Overall ATR Status",
-    "Unique ID",
 ]
 
 CONCERNED_DEPARTMENTS_COLUMNS = [
-    "Unique ID of Representations.csv",
+    "Communication Number",
+    "Communication Date",
+    "Representation Serial Number",
     "Grievance ID / Computer Number",
     "E-Office Receipt Number",
     "Concerned Department Abbreviation",

@@ -1,0 +1,23 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Data directories and files (Input & Output files)
+[Ii]nput/
+[Oo]utput/
+*.xlsx
+*.xls
+*.csv
+~$*
+
+# Environment and IDE
+.env
+.vscode/
+.idea/

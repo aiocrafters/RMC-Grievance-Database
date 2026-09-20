@@ -1,7 +1,6 @@
 import os
 import re
 import csv
-import uuid
 from datetime import datetime
 from difflib import SequenceMatcher
 from pathlib import Path
@@ -57,6 +56,65 @@ def format_to_full_date(val) -> str:
             pass
 
     return date_str
+
+
+def to_roman(n: int) -> str:
+    """Converts an integer to lowercase Roman numerals (1 -> i, 2 -> ii, 3 -> iii, etc.)."""
+    val_map = [
+        (1000, "m"), (900, "cm"), (500, "d"), (400, "cd"),
+        (100, "c"), (90, "xc"), (50, "l"), (40, "xl"),
+        (10, "x"), (9, "ix"), (5, "v"), (4, "iv"), (1, "i")
+    ]
+    res = []
+    for val, roman in val_map:
+        while n >= val:
+            res.append(roman)
+            n -= val
+    return "".join(res)
+
+
+def format_concerned_departments(dept_list: list) -> str:
+    """
+    Formats the Concerned Department(s) column:
+    - Single entry: "{Department} vide E-Office Receipt Number {ReceiptNo}"
+    - Multiple entries: Roman numeral-numbered, each on a new line:
+      (i) {Department1} vide E-Office Receipt Number {ReceiptNo1}
+      (ii) {Department2} vide E-Office Receipt Number {ReceiptNo2}
+    """
+    seen = set()
+    unique_depts = []
+    for d in dept_list:
+        d_name = (d.get("dept_name") or "").strip()
+        r_no = (d.get("receipt_no") or "").strip()
+        if not d_name and not r_no:
+            continue
+        pair = (d_name, r_no)
+        if pair not in seen:
+            seen.add(pair)
+            unique_depts.append((d_name, r_no))
+
+    if not unique_depts:
+        return ""
+
+    if len(unique_depts) == 1:
+        d_name, r_no = unique_depts[0]
+        if d_name and r_no:
+            return f"{d_name} vide E-Office Receipt Number {r_no}"
+        elif d_name:
+            return d_name
+        else:
+            return f"vide E-Office Receipt Number {r_no}"
+
+    lines = []
+    for idx, (d_name, r_no) in enumerate(unique_depts, 1):
+        numeral = to_roman(idx)
+        if d_name and r_no:
+            lines.append(f"({numeral}) {d_name} vide E-Office Receipt Number {r_no}")
+        elif d_name:
+            lines.append(f"({numeral}) {d_name}")
+        else:
+            lines.append(f"({numeral}) vide E-Office Receipt Number {r_no}")
+    return "\n".join(lines)
 
 
 def extract_subject_details(subject_text: str):
@@ -220,6 +278,24 @@ def get_cell_value(row, col_name):
     return clean_cell_value(val)
 
 
+def load_input_file(file_path: Path) -> pd.DataFrame:
+    """Reads input files supporting Excel (.xlsx, .xls) and CSV (.csv) with fallback encodings."""
+    ext = file_path.suffix.lower()
+    if ext == ".xlsx":
+        return pd.read_excel(file_path, dtype=object, engine="openpyxl")
+    elif ext == ".xls":
+        return pd.read_excel(file_path, dtype=object, engine="xlrd")
+    elif ext == ".csv":
+        for encoding in ("utf-8", "utf-8-sig", "latin1", "cp1252"):
+            try:
+                return pd.read_csv(file_path, dtype=object, encoding=encoding)
+            except UnicodeDecodeError:
+                continue
+        return pd.read_csv(file_path, dtype=object)
+    else:
+        raise ValueError(f"Unsupported file extension: {ext}")
+
+
 def main():
     base_dir = Path(__file__).resolve().parent
     input_dir = base_dir / "Input"
@@ -236,9 +312,9 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
     input_dir.mkdir(parents=True, exist_ok=True)
 
-    excel_files = sorted([
+    input_files = sorted([
         f for f in input_dir.iterdir()
-        if f.is_file() and f.suffix.lower() in [".xlsx", ".xls"] and not f.name.startswith("~$")
+        if f.is_file() and f.suffix.lower() in [".xlsx", ".xls", ".csv"] and not f.name.startswith("~$")
     ])
 
     alias_comp = ["comp. no.", "comp no", "compno", "computer no", "computer number", "grievance id", "grievance id / computer number"]
@@ -258,10 +334,9 @@ def main():
     raw_records = []
     print("\nStarting data extraction and normalization pipeline...")
 
-    for file_path in excel_files:
+    for file_path in input_files:
         try:
-            engine = "openpyxl" if file_path.suffix.lower() == ".xlsx" else "xlrd"
-            df = pd.read_excel(file_path, dtype=object, engine=engine)
+            df = load_input_file(file_path)
         except Exception as e:
             print(f"Skipped: {file_path.name} (Error reading file: {e})")
             continue
@@ -429,22 +504,18 @@ def main():
     departments_rows = []
 
     for item, is_blank_gap in final_grouped_items:
-        unique_id = f"REP-{uuid.uuid4().hex[:10].upper()}"
-
         if is_blank_gap:
             rep_row = {col: "" for col in REPRESENTATIONS_COLUMNS}
             rep_row["Communication Number"] = item["comm_no"]
             rep_row["Communication Date"] = item["comm_date"]
             rep_row["Representation Serial Number"] = item["s_no"]
             rep_row["Remarks"] = item.get("remarks", "")
-            rep_row["Unique ID"] = unique_id
             representations_rows.append(rep_row)
             continue
 
         dept_list = item["departments"]
         issue_type = "Multiple" if len(dept_list) > 1 else "Single"
-        dept_names_joined = "; ".join(list(dict.fromkeys([d["dept_name"] for d in dept_list if d["dept_name"]])))
-        overall_status = "; ".join(item["status_list"]) if item["status_list"] else ""
+        concerned_depts_val = format_concerned_departments(dept_list)
 
         rep_row = {
             "Communication Number": item["comm_no"],
@@ -457,19 +528,20 @@ def main():
             "Issue Type (Single / Multiple)": issue_type,
             "Remarks": "",
             "Processing Channel": DEFAULT_VALUES.get("Processing Channel", "E-Office"),
-            "Concerned Department(s)": dept_names_joined,
+            "Concerned Department(s)": concerned_depts_val,
             "Grievance ID / Computer Number": item["grievance_id"],
             "Sent On": item["sent_on"],
             "Letter Number": item["letter_no"],
             "Letter Date": item["letter_date"],
-            "Overall ATR Status": overall_status,
-            "Unique ID": unique_id,
+            "Overall ATR Status": "",  # Left blank per requirement
         }
         representations_rows.append(rep_row)
 
         for d in dept_list:
             departments_rows.append({
-                "Unique ID of Representations.csv": unique_id,
+                "Communication Number": item["comm_no"],
+                "Communication Date": item["comm_date"],
+                "Representation Serial Number": item["s_no"],
                 "Grievance ID / Computer Number": d["grievance_id"],
                 "E-Office Receipt Number": d["receipt_no"],
                 "Concerned Department Abbreviation": d["dept_abbr"],
@@ -494,6 +566,21 @@ def main():
     with pd.ExcelWriter(excel_out_path, engine="openpyxl") as writer:
         df_rep.to_excel(writer, sheet_name="Representations", index=False)
         df_dept.to_excel(writer, sheet_name="Concerned Departments", index=False)
+
+        try:
+            from openpyxl.styles import Alignment
+            ws_rep = writer.sheets["Representations"]
+            col_idx = None
+            for cell in ws_rep[1]:
+                if cell.value == "Concerned Department(s)":
+                    col_idx = cell.column
+                    break
+            if col_idx:
+                for row in ws_rep.iter_rows(min_row=2, min_col=col_idx, max_col=col_idx):
+                    for cell in row:
+                        cell.alignment = Alignment(wrap_text=True, vertical="top")
+        except Exception as e:
+            print(f"Warning: Failed to apply Excel text wrapping ({e})")
 
     print("\n" + "=" * 50)
     print("Processing & Normalization Completed Successfully")
