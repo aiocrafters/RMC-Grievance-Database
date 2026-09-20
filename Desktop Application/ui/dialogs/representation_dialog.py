@@ -33,9 +33,19 @@ class RepresentationDialog(QDialog):
         self.rep_record = rep_record
         self.is_edit_mode = rep_record is not None
 
-        title = "Edit Representation" if self.is_edit_mode else "Add New Representation"
-        self.setWindowTitle(title)
-        self.resize(850, 700)
+        # Load master departments directory for autocompletion & mapping
+        try:
+            self.master_depts = database.get_departments(self.db_path)
+            self.dept_name_to_abbr = {
+                d["department_name"].strip().lower(): (d.get("department_abbreviation") or "").strip()
+                for d in self.master_depts if d.get("department_name")
+            }
+        except Exception:
+            self.master_depts = []
+            self.dept_name_to_abbr = {}
+
+        self.setWindowTitle("Edit Representation" if self.is_edit_mode else "Add Representation")
+        self.resize(1000, 720)
 
         main_layout = QVBoxLayout(self)
         main_layout.setSpacing(10)
@@ -139,6 +149,7 @@ class RepresentationDialog(QDialog):
         self.dept_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.dept_table.horizontalHeader().setSectionResizeMode(3, QHeaderView.Stretch)
         self.dept_table.setMinimumHeight(140)
+        self.dept_table.cellChanged.connect(self._on_dept_cell_changed)
         dept_layout.addWidget(self.dept_table)
 
         layout.addWidget(dept_group)
@@ -174,11 +185,25 @@ class RepresentationDialog(QDialog):
 
         main_layout.addLayout(btn_layout)
 
+    def _on_dept_cell_changed(self, row: int, col: int):
+        if col == 0:
+            item_name = self.dept_table.item(row, 0)
+            item_abbr = self.dept_table.item(row, 1)
+            if item_name and item_abbr:
+                raw_name = item_name.text().strip().lower()
+                if raw_name in self.dept_name_to_abbr:
+                    matched_abbr = self.dept_name_to_abbr[raw_name]
+                    if matched_abbr and not item_abbr.text().strip():
+                        self.dept_table.blockSignals(True)
+                        item_abbr.setText(matched_abbr)
+                        self.dept_table.blockSignals(False)
+
     def _add_dept_row(self):
         self._insert_dept_row_data("", "", "", "", None)
 
     def _insert_dept_row_data(self, dept_name: str, dept_abbr: str, receipt_no: str, location: str, dept_uuid: Optional[str]):
         row_idx = self.dept_table.rowCount()
+        self.dept_table.blockSignals(True)
         self.dept_table.insertRow(row_idx)
 
         item_name = QTableWidgetItem(dept_name)
@@ -193,6 +218,7 @@ class RepresentationDialog(QDialog):
         self.dept_table.setItem(row_idx, 1, item_abbr)
         self.dept_table.setItem(row_idx, 2, item_receipt)
         self.dept_table.setItem(row_idx, 3, item_loc)
+        self.dept_table.blockSignals(False)
 
     def _remove_dept_row(self):
         current_row = self.dept_table.currentRow()
@@ -213,21 +239,33 @@ class RepresentationDialog(QDialog):
 
         # Harvest departments
         depts_data = []
-        for r in range(self.dept_table.rowCount()):
-            item_name = self.dept_table.item(r, 0)
-            item_abbr = self.dept_table.item(r, 1)
-            item_receipt = self.dept_table.item(r, 2)
-            item_loc = self.dept_table.item(r, 3)
+        for row in range(self.dept_table.rowCount()):
+            name_item = self.dept_table.item(row, 0)
+            abbr_item = self.dept_table.item(row, 1)
+            receipt_item = self.dept_table.item(row, 2)
+            loc_item = self.dept_table.item(row, 3)
 
-            d_name = item_name.text().strip() if item_name else ""
-            d_abbr = item_abbr.text().strip() if item_abbr else ""
-            r_no = item_receipt.text().strip() if item_receipt else ""
-            loc = item_loc.text().strip() if item_loc else ""
+            d_name = name_item.text().strip() if name_item else ""
+            d_abbr = abbr_item.text().strip() if abbr_item else ""
+            r_no = receipt_item.text().strip() if receipt_item else ""
+            loc = loc_item.text().strip() if loc_item else ""
 
             if not d_name and not r_no:
                 continue
 
-            dept_uuid = item_name.data(Qt.UserRole) if item_name else None
+            if not d_name:
+                QMessageBox.warning(self, "Validation Error", f"Row {row+1}: Concerned Department is required.")
+                return
+
+            if not r_no:
+                QMessageBox.warning(self, "Validation Error", f"Row {row+1}: E-Office Receipt Number is required.")
+                return
+
+            # Auto-map abbreviation from master table if missing
+            if not d_abbr:
+                d_abbr = self.dept_name_to_abbr.get(d_name.lower(), "")
+
+            dept_uuid = name_item.data(Qt.UserRole) if name_item else None
             depts_data.append({
                 "uuid": dept_uuid or str(uuid.uuid4()),
                 "concerned_department": d_name,

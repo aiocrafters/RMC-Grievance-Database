@@ -1,3 +1,4 @@
+from datetime import datetime
 import sqlite3
 import uuid
 from pathlib import Path
@@ -67,6 +68,20 @@ def init_db(db_path: str) -> None:
             );
         """)
 
+        # Table 3: departments (Master Departments Table)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS departments (
+                uuid TEXT PRIMARY KEY,
+                department_name TEXT NOT NULL,
+                department_abbreviation TEXT,
+                department_address TEXT,
+                department_additional_address TEXT,
+                department_addressee TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+
         # Indexes for fast querying, filtering, and joins
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_rep_comm_no ON representations(communication_number);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_rep_serial ON representations(representation_serial_number);")
@@ -75,6 +90,10 @@ def init_db(db_path: str) -> None:
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_dept_rep_uuid ON concerned_departments(representation_uuid);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_dept_receipt ON concerned_departments(eoffice_receipt_number);")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_dept_name ON concerned_departments(concerned_department);")
+
+        # Indexes for departments master table
+        cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_dept_unique_name ON departments(LOWER(TRIM(department_name)));")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_dept_abbr ON departments(LOWER(TRIM(department_abbreviation)));")
 
         conn.commit()
 
@@ -554,3 +573,188 @@ def get_dashboard_metrics(db_path: str) -> Dict[str, int]:
             "reply_received": 0,
             "closed_resolved": 0,
         }
+
+
+# ==========================================
+# MASTER DEPARTMENTS MANAGEMENT
+# ==========================================
+
+def get_departments(
+    db_path: str,
+    search_query: Optional[str] = None,
+    sort_column: str = "department_name",
+    sort_order: str = "ASC",
+) -> List[Dict[str, Any]]:
+    """Retrieves all master departments, optionally filtered by search text and sorted."""
+    valid_cols = {
+        "department_name": "LOWER(department_name)",
+        "department_abbreviation": "LOWER(department_abbreviation)",
+        "department_address": "department_address",
+        "department_additional_address": "department_additional_address",
+        "department_addressee": "department_addressee",
+        "created_at": "created_at",
+    }
+    col = valid_cols.get(sort_column, "LOWER(department_name)")
+    order = "DESC" if sort_order.upper() == "DESC" else "ASC"
+
+    query = "SELECT * FROM departments WHERE 1=1"
+    params: List[Any] = []
+
+    if search_query:
+        pattern = f"%{search_query.strip()}%"
+        query += """ AND (
+            department_name LIKE ? OR
+            department_abbreviation LIKE ? OR
+            department_address LIKE ? OR
+            department_additional_address LIKE ? OR
+            department_addressee LIKE ?
+        )"""
+        params.extend([pattern] * 5)
+
+    query += f" ORDER BY {col} {order}"
+
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(query, params)
+        return [dict(r) for r in cursor.fetchall()]
+
+
+def get_department_by_uuid(db_path: str, dept_uuid: str) -> Optional[Dict[str, Any]]:
+    """Retrieves a single department record by UUID."""
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM departments WHERE uuid = ?", (dept_uuid,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+
+def is_department_name_taken(db_path: str, name: str, exclude_uuid: Optional[str] = None) -> bool:
+    """Checks if a department name already exists (case-insensitive and trimmed)."""
+    name_clean = name.strip().lower()
+    if not name_clean:
+        return False
+    query = "SELECT 1 FROM departments WHERE LOWER(TRIM(department_name)) = ?"
+    params = [name_clean]
+    if exclude_uuid:
+        query += " AND uuid != ?"
+        params.append(exclude_uuid)
+
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute(query, params)
+        return cursor.fetchone() is not None
+
+
+def insert_department(db_path: str, dept_data: Dict[str, Any]) -> str:
+    """Inserts a new department record into the master departments table."""
+    dept_uuid = dept_data.get("uuid") or str(uuid.uuid4())
+    now = dept_data.get("created_at") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO departments (
+                uuid, department_name, department_abbreviation,
+                department_address, department_additional_address,
+                department_addressee, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            dept_uuid,
+            (dept_data.get("department_name") or "").strip(),
+            (dept_data.get("department_abbreviation") or "").strip(),
+            (dept_data.get("department_address") or "").strip(),
+            (dept_data.get("department_additional_address") or "").strip(),
+            (dept_data.get("department_addressee") or "").strip(),
+            now,
+            now,
+        ))
+        conn.commit()
+    return dept_uuid
+
+
+def update_department(db_path: str, dept_uuid: str, dept_data: Dict[str, Any]) -> bool:
+    """Updates an existing department record."""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE departments SET
+                department_name = ?,
+                department_abbreviation = ?,
+                department_address = ?,
+                department_additional_address = ?,
+                department_addressee = ?,
+                updated_at = ?
+            WHERE uuid = ?
+        """, (
+            (dept_data.get("department_name") or "").strip(),
+            (dept_data.get("department_abbreviation") or "").strip(),
+            (dept_data.get("department_address") or "").strip(),
+            (dept_data.get("department_additional_address") or "").strip(),
+            (dept_data.get("department_addressee") or "").strip(),
+            now,
+            dept_uuid,
+        ))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def delete_department(db_path: str, dept_uuid: str) -> bool:
+    """Deletes a department from the master table."""
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM departments WHERE uuid = ?", (dept_uuid,))
+        conn.commit()
+        return cursor.rowcount > 0
+
+
+def count_department_references(db_path: str, dept_name: str) -> int:
+    """Counts how many concerned_departments records reference this department name."""
+    if not dept_name:
+        return 0
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT COUNT(*) as cnt FROM concerned_departments 
+            WHERE LOWER(TRIM(concerned_department)) = ?
+        """, (dept_name.strip().lower(),))
+        row = cursor.fetchone()
+        return row["cnt"] if row else 0
+
+
+def seed_default_departments_if_empty(db_path: str) -> int:
+    """Seeds default departments from mappings.DEPARTMENT_MAPPING if the table is empty."""
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) as cnt FROM departments")
+        count = cursor.fetchone()["cnt"]
+        if count > 0:
+            return 0
+
+        try:
+            from mappings import DEPARTMENT_MAPPING
+            inserted = 0
+            seen_names = set()
+            now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+            for k, meta in DEPARTMENT_MAPPING.items():
+                name = (meta.get("name") or "").strip()
+                abbr = (meta.get("abbr") or "").strip()
+                if not name or name.lower() in seen_names:
+                    continue
+                seen_names.add(name.lower())
+                cursor.execute("""
+                    INSERT INTO departments (
+                        uuid, department_name, department_abbreviation,
+                        department_address, department_additional_address,
+                        department_addressee, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (str(uuid.uuid4()), name, abbr, "", "", "", now, now))
+                inserted += 1
+
+            conn.commit()
+            return inserted
+        except Exception as e:
+            print(f"Failed to seed default departments: {e}")
+            return 0
+

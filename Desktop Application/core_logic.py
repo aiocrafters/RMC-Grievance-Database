@@ -168,14 +168,25 @@ def extract_subject_details(subject_text: str) -> Tuple[str, str, str, List[str]
 
 
 class DepartmentResolver:
-    """Resolves department names using dictionary mappings, aliases, and fuzzy similarity."""
+    """Resolves department names using SQLite master departments table, dictionary mappings, aliases, and fuzzy similarity."""
 
-    def __init__(self, ref_csv_path: Optional[Path] = None):
+    def __init__(self, ref_csv_path: Optional[Path] = None, db_path: Optional[str] = None):
+        self.ref_csv_path = ref_csv_path
+        self.db_path = db_path
         self.alias_map: Dict[str, Tuple[str, str]] = {}
         self.dept_records: List[Dict[str, str]] = []
+        self.refresh(db_path=db_path)
 
-        # Built-in direct common aliases
-        self.alias_map = {
+    def refresh(self, db_path: Optional[str] = None):
+        """Reloads department records and aliases, prioritizing SQLite master departments table."""
+        if db_path:
+            self.db_path = db_path
+
+        self.alias_map = {}
+        self.dept_records = []
+
+        # 1. Built-in common fallback aliases
+        built_in_aliases = {
             "jkhod": ("Head of Department", "HOD"),
             "jkdcof": ("Deputy Commissioner", "DC"),
             "deputy commissioner": ("Deputy Commissioner", "DC"),
@@ -183,15 +194,18 @@ class DepartmentResolver:
             "r&b": ("Public Works (R&B) Department", "PWD"),
             "revenue": ("Revenue Department", "REV"),
         }
+        for k, v in built_in_aliases.items():
+            self.alias_map[k] = v
 
         for raw_k, meta in DEPARTMENT_MAPPING.items():
             norm_k = normalize_string(raw_k)
             if norm_k not in self.alias_map:
                 self.alias_map[norm_k] = (meta["name"], meta["abbr"])
 
-        if ref_csv_path and ref_csv_path.exists():
+        # 2. Load from reference CSV if provided
+        if self.ref_csv_path and self.ref_csv_path.exists():
             try:
-                df_ref = pd.read_csv(ref_csv_path, dtype=str)
+                df_ref = pd.read_csv(self.ref_csv_path, dtype=str)
                 for _, r in df_ref.iterrows():
                     name = str(r.get("Department Name", "")).strip()
                     abbr = str(r.get("Department Abbreviation", "")).strip()
@@ -202,8 +216,34 @@ class DepartmentResolver:
                             "norm_name": normalize_string(name),
                             "norm_abbr": normalize_string(abbr),
                         })
+                        if name:
+                            self.alias_map[normalize_string(name)] = (name, abbr)
+                        if abbr:
+                            self.alias_map[normalize_string(abbr)] = (name, abbr)
             except Exception as e:
                 print(f"Warning: Failed to load reference CSV ({e})")
+
+        # 3. Master Departments from SQLite database (highest priority)
+        if self.db_path and Path(self.db_path).exists():
+            try:
+                import database
+                master_depts = database.get_departments(self.db_path)
+                for d in master_depts:
+                    name = (d.get("department_name") or "").strip()
+                    abbr = (d.get("department_abbreviation") or "").strip()
+                    if name or abbr:
+                        self.dept_records.append({
+                            "name": name,
+                            "abbr": abbr,
+                            "norm_name": normalize_string(name),
+                            "norm_abbr": normalize_string(abbr),
+                        })
+                        if name:
+                            self.alias_map[normalize_string(name)] = (name, abbr)
+                        if abbr:
+                            self.alias_map[normalize_string(abbr)] = (name, abbr)
+            except Exception as e:
+                print(f"Warning: Failed to load master departments from database ({e})")
 
     def resolve(self, raw_input: Any) -> Tuple[str, str]:
         if raw_input is None or pd.isna(raw_input):

@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QMainWindow,
     QMessageBox,
     QPushButton,
+    QStackedWidget,
     QStatusBar,
     QTableView,
     QToolBar,
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
 import config
 import database
 from ui.action_delegate import ActionDelegate
+from ui.departments_page import DepartmentsPage
 from ui.dialogs.atr_dialog import AtrManagementDialog
 from ui.dialogs.db_location_dialog import DbLocationDialog
 from ui.dialogs.export_dialog import ExportDialog
@@ -129,17 +131,64 @@ class MainWindow(QMainWindow):
     def _setup_ui(self):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
-        main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(16, 12, 16, 12)
-        main_layout.setSpacing(12)
+        root_layout = QVBoxLayout(central_widget)
+        root_layout.setContentsMargins(16, 10, 16, 10)
+        root_layout.setSpacing(10)
 
-        # 1. Top Action Bar
+        # 1. Top Global Navigation Bar
+        nav_frame = QFrame()
+        nav_frame.setStyleSheet("""
+            QFrame {
+                background-color: #FFFFFF;
+                border: 1px solid #E2E8F0;
+                border-radius: 8px;
+                padding: 4px;
+            }
+        """)
+        nav_layout = QHBoxLayout(nav_frame)
+        nav_layout.setContentsMargins(10, 4, 10, 4)
+        nav_layout.setSpacing(8)
+
+        app_title = QLabel("RMC Grievance & Department System")
+        app_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #1E3A8A; margin-right: 14px;")
+        nav_layout.addWidget(app_title)
+
+        self.nav_dashboard_btn = QPushButton("📋  Grievance Dashboard")
+        self.nav_dashboard_btn.setCursor(Qt.PointingHandCursor)
+        self.nav_dashboard_btn.clicked.connect(lambda: self._switch_tab(0))
+        nav_layout.addWidget(self.nav_dashboard_btn)
+
+        self.nav_depts_btn = QPushButton("🏢  Master Departments")
+        self.nav_depts_btn.setCursor(Qt.PointingHandCursor)
+        self.nav_depts_btn.clicked.connect(lambda: self._switch_tab(1))
+        nav_layout.addWidget(self.nav_depts_btn)
+
+        nav_layout.addStretch()
+
+        self.db_settings_btn = QPushButton("📁  Database Location")
+        self.db_settings_btn.setCursor(Qt.PointingHandCursor)
+        self.db_settings_btn.setStyleSheet("padding: 5px 12px; font-size: 12px; font-weight: 500;")
+        self.db_settings_btn.clicked.connect(self._open_db_location_dialog)
+        nav_layout.addWidget(self.db_settings_btn)
+
+        root_layout.addWidget(nav_frame)
+
+        # 2. Stacked Pages
+        self.stack = QStackedWidget()
+
+        # Page 0: Grievance Dashboard Widget
+        dashboard_widget = QWidget()
+        dash_layout = QVBoxLayout(dashboard_widget)
+        dash_layout.setContentsMargins(0, 4, 0, 0)
+        dash_layout.setSpacing(10)
+
+        # Dashboard Top Action Bar
         top_bar_layout = QHBoxLayout()
         top_bar_layout.setSpacing(10)
 
-        app_title = QLabel("RMC Grievance Dashboard")
-        app_title.setStyleSheet("font-size: 18px; font-weight: bold; color: #1E3A8A;")
-        top_bar_layout.addWidget(app_title)
+        dash_title = QLabel("Representations Registry")
+        dash_title.setStyleSheet("font-size: 16px; font-weight: bold; color: #1E3A8A;")
+        top_bar_layout.addWidget(dash_title)
         top_bar_layout.addStretch()
 
         self.import_btn = QPushButton("📥  Import Data (CSV/Excel)")
@@ -157,18 +206,14 @@ class MainWindow(QMainWindow):
         self.refresh_btn = QPushButton("🔄  Refresh")
         self.refresh_btn.clicked.connect(self.refresh_data)
 
-        self.db_settings_btn = QPushButton("📁  Database Location")
-        self.db_settings_btn.clicked.connect(self._open_db_location_dialog)
-
         top_bar_layout.addWidget(self.import_btn)
         top_bar_layout.addWidget(self.export_btn)
         top_bar_layout.addWidget(self.add_rep_btn)
         top_bar_layout.addWidget(self.refresh_btn)
-        top_bar_layout.addWidget(self.db_settings_btn)
 
-        main_layout.addLayout(top_bar_layout)
+        dash_layout.addLayout(top_bar_layout)
 
-        # 2. Filter & Search Bar
+        # Filter & Search Bar
         filter_frame = QFrame()
         filter_frame.setStyleSheet("""
             QFrame {
@@ -182,20 +227,17 @@ class MainWindow(QMainWindow):
         filter_layout.setContentsMargins(10, 8, 10, 8)
         filter_layout.setSpacing(10)
 
-        # Search Bar
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("🔍  Search Communication No, Serial No, Applicant, Subject, Grievance ID, ATR...")
         self.search_input.setClearButtonEnabled(True)
         self.search_input.textChanged.connect(self._on_search_changed)
         filter_layout.addWidget(self.search_input, stretch=3)
 
-        # Filter: Comm No
         self.comm_combo = QComboBox()
         self.comm_combo.addItem("All Comm Numbers", "")
         self.comm_combo.currentIndexChanged.connect(self.refresh_data)
         filter_layout.addWidget(self.comm_combo, stretch=1)
 
-        # Filter: Issue Type
         self.issue_combo = QComboBox()
         self.issue_combo.addItem("All Issue Types", "")
         self.issue_combo.addItem("Single", "Single")
@@ -203,20 +245,18 @@ class MainWindow(QMainWindow):
         self.issue_combo.currentIndexChanged.connect(self.refresh_data)
         filter_layout.addWidget(self.issue_combo, stretch=1)
 
-        # Filter: Department
         self.dept_combo = QComboBox()
         self.dept_combo.addItem("All Departments", "")
         self.dept_combo.currentIndexChanged.connect(self.refresh_data)
         filter_layout.addWidget(self.dept_combo, stretch=2)
 
-        # Clear Filters Button
         clear_btn = QPushButton("Reset Filters")
         clear_btn.clicked.connect(self._clear_filters)
         filter_layout.addWidget(clear_btn)
 
-        main_layout.addWidget(filter_frame)
+        dash_layout.addWidget(filter_frame)
 
-        # 3. Dynamic Summary Cards (Top of Data Table)
+        # Dynamic Summary Cards (Top of Data Table)
         metrics_layout = QHBoxLayout()
         metrics_layout.setSpacing(10)
 
@@ -235,9 +275,9 @@ class MainWindow(QMainWindow):
             metrics_layout.addWidget(card)
             self.metric_cards[key] = card
 
-        main_layout.addLayout(metrics_layout)
+        dash_layout.addLayout(metrics_layout)
 
-        # 4. Representations Table View
+        # Representations Table View
         self.table_view = QTableView()
         self.table_model = RepresentationTableModel([])
         self.table_view.setModel(self.table_model)
@@ -248,15 +288,12 @@ class MainWindow(QMainWindow):
         self.table_view.setWordWrap(True)
         self.table_view.verticalHeader().setDefaultSectionSize(42)
 
-        # Setup Action Delegate for the 3-dot (⋮) menu column (index 16)
         self.action_delegate = ActionDelegate(self)
         self.action_delegate.action_triggered.connect(self._handle_action)
         self.table_view.setItemDelegateForColumn(16, self.action_delegate)
 
-        # Double click to edit
         self.table_view.doubleClicked.connect(self._on_row_double_clicked)
 
-        # Header styling and resizing
         header = self.table_view.horizontalHeader()
         header.setStretchLastSection(False)
         header.setDefaultAlignment(Qt.AlignLeft | Qt.AlignVCenter)
@@ -271,9 +308,20 @@ class MainWindow(QMainWindow):
             }
         """)
 
-        main_layout.addWidget(self.table_view)
+        dash_layout.addWidget(self.table_view)
+        self.stack.addWidget(dashboard_widget)
 
-        # 4. Status Bar
+        # Page 1: Dedicated Master Departments Screen
+        self.departments_page = DepartmentsPage(self.db_path, self)
+        self.departments_page.department_changed.connect(self._load_filter_options)
+        self.stack.addWidget(self.departments_page)
+
+        root_layout.addWidget(self.stack)
+
+        # Apply initial nav button styles
+        self._update_nav_styles(0)
+
+        # 3. Status Bar
         self.status_bar = QStatusBar()
         self.setStatusBar(self.status_bar)
         self.db_status_lbl = QLabel(f"Database: {self.db_path}")
@@ -285,6 +333,49 @@ class MainWindow(QMainWindow):
         self.search_timer = QTimer(self)
         self.search_timer.setSingleShot(True)
         self.search_timer.timeout.connect(self.refresh_data)
+
+    def _switch_tab(self, index: int):
+        self.stack.setCurrentIndex(index)
+        self._update_nav_styles(index)
+        if index == 0:
+            self.refresh_data()
+            self._load_filter_options()
+        elif index == 1:
+            self.departments_page.refresh_departments()
+
+    def _update_nav_styles(self, active_index: int):
+        active_style = """
+            QPushButton {
+                background-color: #1E3A8A;
+                color: white;
+                font-weight: bold;
+                padding: 6px 18px;
+                border-radius: 6px;
+                border: none;
+                font-size: 13px;
+            }
+        """
+        inactive_style = """
+            QPushButton {
+                background-color: #F1F5F9;
+                color: #475569;
+                font-weight: 600;
+                padding: 6px 18px;
+                border-radius: 6px;
+                border: 1px solid #CBD5E1;
+                font-size: 13px;
+            }
+            QPushButton:hover {
+                background-color: #E2E8F0;
+                color: #1E293B;
+            }
+        """
+        if active_index == 0:
+            self.nav_dashboard_btn.setStyleSheet(active_style)
+            self.nav_depts_btn.setStyleSheet(inactive_style)
+        else:
+            self.nav_dashboard_btn.setStyleSheet(inactive_style)
+            self.nav_depts_btn.setStyleSheet(active_style)
 
     def _on_search_changed(self):
         self.search_timer.start(300)
@@ -478,6 +569,9 @@ class MainWindow(QMainWindow):
                 self.db_path = new_path
                 database.init_db(self.db_path)
                 self.db_status_lbl.setText(f"Database: {self.db_path}")
+                if hasattr(self, "departments_page"):
+                    self.departments_page.db_path = self.db_path
+                    self.departments_page.refresh_departments()
                 self._load_filter_options()
                 self.refresh_data()
                 QMessageBox.information(self, "Database Changed", f"Connected to database at:\n{self.db_path}")

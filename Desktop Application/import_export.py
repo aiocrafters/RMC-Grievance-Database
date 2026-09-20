@@ -1,4 +1,5 @@
 import csv
+from dataclasses import dataclass, field
 import io
 import os
 import uuid
@@ -75,7 +76,7 @@ def import_file_to_database(
 
     if resolver is None:
         ref_csv = Path(__file__).resolve().parent / "Departments_Supabase_2026-09-15.csv"
-        resolver = DepartmentResolver(ref_csv if ref_csv.exists() else None)
+        resolver = DepartmentResolver(ref_csv if ref_csv.exists() else None, db_path=db_path)
 
     try:
         df = load_input_file(path_obj)
@@ -495,3 +496,163 @@ def export_to_pdf(
 
     elements.append(t)
     doc.build(elements, canvasmaker=NumberedCanvas)
+
+
+# ==========================================
+# MASTER DEPARTMENTS IMPORT / EXPORT
+# ==========================================
+
+@dataclass
+class DepartmentImportSummary:
+    """Summary of department CSV import results."""
+    total_rows: int = 0
+    inserted_count: int = 0
+    updated_count: int = 0
+    skipped_duplicate_count: int = 0
+    error_count: int = 0
+    errors: List[str] = field(default_factory=list)
+
+    def to_dict(self) -> Dict[str, Any]:
+        return {
+            "total_rows": self.total_rows,
+            "inserted_count": self.inserted_count,
+            "updated_count": self.updated_count,
+            "skipped_duplicate_count": self.skipped_duplicate_count,
+            "error_count": self.error_count,
+            "errors": self.errors,
+        }
+
+
+def validate_and_import_departments_csv(
+    file_path: str,
+    db_path: str,
+    update_existing: bool = False,
+) -> DepartmentImportSummary:
+    """
+    Validates and imports department records from a CSV file into SQLite.
+    Prevents unintended duplicates by checking existing database records and
+    in-file duplicates (case-insensitive name comparison).
+    """
+    summary = DepartmentImportSummary()
+    path_obj = Path(file_path)
+
+    if not path_obj.exists():
+        summary.errors.append(f"File not found: {file_path}")
+        summary.error_count += 1
+        return summary
+
+    try:
+        df = pd.read_csv(path_obj, dtype=str, keep_default_na=False)
+    except Exception as e:
+        summary.errors.append(f"Could not read CSV file: {str(e)}")
+        summary.error_count += 1
+        return summary
+
+    summary.total_rows = len(df)
+    if summary.total_rows == 0:
+        summary.errors.append("The CSV file contains no data rows.")
+        summary.error_count += 1
+        return summary
+
+    # Identify column mappings flexibly
+    col_map: Dict[str, str] = {}
+    for col in df.columns:
+        c_norm = col.strip().lower().replace("_", " ")
+        if c_norm in ["department name", "dept name", "name", "department"]:
+            col_map["name"] = col
+        elif c_norm in ["department abbreviation", "dept abbreviation", "abbreviation", "abbr"]:
+            col_map["abbr"] = col
+        elif c_norm in ["department address", "dept address", "address"]:
+            col_map["address"] = col
+        elif c_norm in ["department additional address", "additional address", "address 2", "address2"]:
+            col_map["additional_address"] = col
+        elif c_norm in ["department addressee", "dept addressee", "addressee", "contact person", "officer"]:
+            col_map["addressee"] = col
+
+    if "name" not in col_map:
+        summary.errors.append(
+            f"Required column 'Department Name' not found in CSV. Found headers: {list(df.columns)}"
+        )
+        summary.error_count += 1
+        return summary
+
+    seen_in_file = set()
+
+    for idx, row in df.iterrows():
+        row_num = idx + 2  # 1-indexed accounting for CSV header
+        raw_name = str(row[col_map["name"]]).strip() if col_map.get("name") else ""
+        raw_abbr = str(row[col_map["abbr"]]).strip() if col_map.get("abbr") else ""
+        raw_addr = str(row[col_map["address"]]).strip() if col_map.get("address") else ""
+        raw_add_addr = str(row[col_map["additional_address"]]).strip() if col_map.get("additional_address") else ""
+        raw_addressee = str(row[col_map["addressee"]]).strip() if col_map.get("addressee") else ""
+
+        if not raw_name:
+            summary.errors.append(f"Row {row_num}: Department Name is blank. Skipped.")
+            summary.error_count += 1
+            continue
+
+        norm_name = raw_name.lower()
+
+        # Check in-file duplicate
+        if norm_name in seen_in_file:
+            summary.skipped_duplicate_count += 1
+            summary.errors.append(f"Row {row_num}: Duplicate department '{raw_name}' in CSV file. Skipped.")
+            continue
+        seen_in_file.add(norm_name)
+
+        # Check existing database records
+        existing_matches = database.get_departments(db_path, search_query=raw_name)
+        matched = None
+        for d in existing_matches:
+            if d["department_name"].strip().lower() == norm_name:
+                matched = d
+                break
+
+        if matched:
+            if update_existing:
+                update_data = {
+                    "department_name": raw_name,
+                    "department_abbreviation": raw_abbr or matched.get("department_abbreviation", ""),
+                    "department_address": raw_addr or matched.get("department_address", ""),
+                    "department_additional_address": raw_add_addr or matched.get("department_additional_address", ""),
+                    "department_addressee": raw_addressee or matched.get("department_addressee", ""),
+                }
+                database.update_department(db_path, matched["uuid"], update_data)
+                summary.updated_count += 1
+            else:
+                summary.skipped_duplicate_count += 1
+        else:
+            insert_data = {
+                "department_name": raw_name,
+                "department_abbreviation": raw_abbr,
+                "department_address": raw_addr,
+                "department_additional_address": raw_add_addr,
+                "department_addressee": raw_addressee,
+            }
+            database.insert_department(db_path, insert_data)
+            summary.inserted_count += 1
+
+    return summary
+
+
+def export_departments_to_csv(departments: List[Dict[str, Any]], target_path: str) -> None:
+    """Exports master departments list to CSV format."""
+    headers = [
+        "Department Name",
+        "Department Abbreviation",
+        "Department Address",
+        "Department Additional Address",
+        "Department Addressee",
+    ]
+    with open(target_path, "w", newline="", encoding="utf-8-sig") as f:
+        writer = csv.writer(f)
+        writer.writerow(headers)
+        for d in departments:
+            writer.writerow([
+                d.get("department_name", ""),
+                d.get("department_abbreviation", ""),
+                d.get("department_address", ""),
+                d.get("department_additional_address", ""),
+                d.get("department_addressee", ""),
+            ])
+
