@@ -146,6 +146,16 @@ def get_representations(
         if filters.get("concerned_department"):
             query += " AND concerned_departments LIKE ?"
             params.append(f"%{filters['concerned_department']}%")
+        if filters.get("atr_category"):
+            cat = filters["atr_category"]
+            if cat == "pending_atr":
+                query += " AND (overall_atr_status IS NULL OR TRIM(overall_atr_status) = '' OR LOWER(overall_atr_status) LIKE '%pending%') AND LOWER(remarks) NOT LIKE '%missing%'"
+            elif cat == "under_process":
+                query += " AND (LOWER(overall_atr_status) LIKE '%under process%' OR LOWER(overall_atr_status) LIKE '%inside file%' OR LOWER(overall_atr_status) LIKE '%sent%')"
+            elif cat == "reply_received":
+                query += " AND (LOWER(overall_atr_status) LIKE '%reply received%' OR LOWER(overall_atr_status) LIKE '%reply%')"
+            elif cat == "closed_resolved":
+                query += " AND (LOWER(overall_atr_status) LIKE '%closed%' OR LOWER(overall_atr_status) LIKE '%resolved%' OR LOWER(overall_atr_status) LIKE '%disposed%')"
 
     query += f" ORDER BY {col_order_clause} {order_dir}, representation_serial_number {order_dir}"
 
@@ -203,6 +213,16 @@ def count_representations(
         if filters.get("concerned_department"):
             query += " AND concerned_departments LIKE ?"
             params.append(f"%{filters['concerned_department']}%")
+        if filters.get("atr_category"):
+            cat = filters["atr_category"]
+            if cat == "pending_atr":
+                query += " AND (overall_atr_status IS NULL OR TRIM(overall_atr_status) = '' OR LOWER(overall_atr_status) LIKE '%pending%') AND LOWER(remarks) NOT LIKE '%missing%'"
+            elif cat == "under_process":
+                query += " AND (LOWER(overall_atr_status) LIKE '%under process%' OR LOWER(overall_atr_status) LIKE '%inside file%' OR LOWER(overall_atr_status) LIKE '%sent%')"
+            elif cat == "reply_received":
+                query += " AND (LOWER(overall_atr_status) LIKE '%reply received%' OR LOWER(overall_atr_status) LIKE '%reply%')"
+            elif cat == "closed_resolved":
+                query += " AND (LOWER(overall_atr_status) LIKE '%closed%' OR LOWER(overall_atr_status) LIKE '%resolved%' OR LOWER(overall_atr_status) LIKE '%disposed%')"
 
     with get_connection(db_path) as conn:
         cursor = conn.cursor()
@@ -477,4 +497,60 @@ def get_filter_options(db_path: str) -> Dict[str, List[str]]:
             "processing_channels": channels,
             "concerned_departments": depts,
             "atr_statuses": atr_statuses,
+        }
+
+
+def get_dashboard_metrics(db_path: str) -> Dict[str, int]:
+    """
+    Computes dynamic counts for the dashboard top metrics cards:
+    - Total Records
+    - Pending ATR
+    - Under Process
+    - Reply Received
+    - Closed / Resolved
+    """
+    with get_connection(db_path) as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT 
+                COUNT(*) as total_records,
+                SUM(CASE 
+                    WHEN (overall_atr_status IS NULL OR TRIM(overall_atr_status) = '' OR LOWER(overall_atr_status) LIKE '%pending%')
+                         AND LOWER(remarks) NOT LIKE '%missing%'
+                    THEN 1 ELSE 0 
+                END) as pending_atr,
+                SUM(CASE 
+                    WHEN LOWER(overall_atr_status) LIKE '%under process%' 
+                      OR LOWER(overall_atr_status) LIKE '%inside file%' 
+                      OR LOWER(overall_atr_status) LIKE '%sent%' 
+                    THEN 1 ELSE 0 
+                END) as under_process,
+                SUM(CASE 
+                    WHEN LOWER(overall_atr_status) LIKE '%reply received%' 
+                      OR LOWER(overall_atr_status) LIKE '%reply%' 
+                    THEN 1 ELSE 0 
+                END) as reply_received,
+                SUM(CASE 
+                    WHEN LOWER(overall_atr_status) LIKE '%closed%' 
+                      OR LOWER(overall_atr_status) LIKE '%resolved%' 
+                      OR LOWER(overall_atr_status) LIKE '%disposed%' 
+                    THEN 1 ELSE 0 
+                END) as closed_resolved
+            FROM representations
+        """)
+        row = cursor.fetchone()
+        if row:
+            return {
+                "total_records": row["total_records"] or 0,
+                "pending_atr": row["pending_atr"] or 0,
+                "under_process": row["under_process"] or 0,
+                "reply_received": row["reply_received"] or 0,
+                "closed_resolved": row["closed_resolved"] or 0,
+            }
+        return {
+            "total_records": 0,
+            "pending_atr": 0,
+            "under_process": 0,
+            "reply_received": 0,
+            "closed_resolved": 0,
         }

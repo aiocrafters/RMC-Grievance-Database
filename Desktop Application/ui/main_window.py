@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from PySide6.QtCore import QTimer, Qt
+from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtGui import QAction, QColor, QFont, QIcon
 from PySide6.QtWidgets import (
     QComboBox,
@@ -31,12 +31,93 @@ from ui.dialogs.representation_dialog import RepresentationDialog
 from ui.table_model import COLUMNS, RepresentationTableModel
 
 
+class MetricCard(QFrame):
+    """Clickable KPI metric card displaying dynamically calculated counts with status styling."""
+    clicked = Signal(str)
+
+    def __init__(self, key: str, title: str, accent_color: str, bg_tint: str, icon_str: str = ""):
+        super().__init__()
+        self.key = key
+        self.title_str = title
+        self.accent_color = accent_color
+        self.bg_tint = bg_tint
+        self.icon_str = icon_str
+        self._is_active = False
+
+        self.setObjectName(f"card_{key}")
+        self.setCursor(Qt.PointingHandCursor)
+        self._setup_ui()
+        self._update_style()
+
+    def _setup_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(4)
+
+        header_layout = QHBoxLayout()
+        header_layout.setSpacing(6)
+        if self.icon_str:
+            self.icon_lbl = QLabel(self.icon_str)
+            self.icon_lbl.setStyleSheet("font-size: 14px;")
+            self.icon_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+            header_layout.addWidget(self.icon_lbl)
+
+        self.title_lbl = QLabel(self.title_str)
+        self.title_lbl.setStyleSheet("font-size: 12px; font-weight: 600; color: #475569;")
+        self.title_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        header_layout.addWidget(self.title_lbl)
+        header_layout.addStretch()
+        layout.addLayout(header_layout)
+
+        self.count_lbl = QLabel("0")
+        self.count_lbl.setStyleSheet(f"font-size: 22px; font-weight: bold; color: {self.accent_color};")
+        self.count_lbl.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        layout.addWidget(self.count_lbl)
+
+    def set_count(self, count: int):
+        self.count_lbl.setText(f"{count:,}")
+
+    def set_active(self, active: bool):
+        self._is_active = active
+        self._update_style()
+
+    def _update_style(self):
+        if self._is_active:
+            self.setStyleSheet(f"""
+                QFrame#card_{self.key} {{
+                    background-color: {self.bg_tint};
+                    border: 2px solid {self.accent_color};
+                    border-radius: 8px;
+                }}
+            """)
+        else:
+            self.setStyleSheet(f"""
+                QFrame#card_{self.key} {{
+                    background-color: #FFFFFF;
+                    border: 1px solid #E2E8F0;
+                    border-left: 4px solid {self.accent_color};
+                    border-radius: 8px;
+                }}
+                QFrame#card_{self.key}:hover {{
+                    background-color: {self.bg_tint};
+                    border: 1px solid {self.accent_color};
+                    border-left: 4px solid {self.accent_color};
+                }}
+            """)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self.clicked.emit(self.key)
+        super().mousePressEvent(event)
+
+
 class MainWindow(QMainWindow):
     """Main Application Dashboard Window for RMC Grievance Management."""
 
     def __init__(self, db_path: str):
         super().__init__()
         self.db_path = db_path
+        self.active_metric_filter: Optional[str] = None
 
         self.setWindowTitle("RMC Grievance Management System - Dashboard")
         self.resize(1340, 780)
@@ -135,7 +216,28 @@ class MainWindow(QMainWindow):
 
         main_layout.addWidget(filter_frame)
 
-        # 3. Representations Table View
+        # 3. Dynamic Summary Cards (Top of Data Table)
+        metrics_layout = QHBoxLayout()
+        metrics_layout.setSpacing(10)
+
+        cards_config = [
+            ("all", "Total Records", "#1E3A8A", "#EFF6FF", "📊"),
+            ("pending_atr", "Pending ATR", "#D97706", "#FFFBEB", "⏳"),
+            ("under_process", "Under Process", "#0284C7", "#F0F9FF", "⚙️"),
+            ("reply_received", "Reply Received", "#7C3AED", "#F5F3FF", "📩"),
+            ("closed_resolved", "Closed / Resolved", "#059669", "#ECFDF5", "✅"),
+        ]
+
+        self.metric_cards: Dict[str, MetricCard] = {}
+        for key, title, accent, bg_tint, icon in cards_config:
+            card = MetricCard(key=key, title=title, accent_color=accent, bg_tint=bg_tint, icon_str=icon)
+            card.clicked.connect(self._on_metric_card_clicked)
+            metrics_layout.addWidget(card)
+            self.metric_cards[key] = card
+
+        main_layout.addLayout(metrics_layout)
+
+        # 4. Representations Table View
         self.table_view = QTableView()
         self.table_model = RepresentationTableModel([])
         self.table_view.setModel(self.table_model)
@@ -187,11 +289,21 @@ class MainWindow(QMainWindow):
     def _on_search_changed(self):
         self.search_timer.start(300)
 
+    def _on_metric_card_clicked(self, key: str):
+        if key == "all":
+            self.active_metric_filter = None
+        elif self.active_metric_filter == key:
+            self.active_metric_filter = None
+        else:
+            self.active_metric_filter = key
+        self.refresh_data()
+
     def _clear_filters(self):
         self.search_input.clear()
         self.comm_combo.setCurrentIndex(0)
         self.issue_combo.setCurrentIndex(0)
         self.dept_combo.setCurrentIndex(0)
+        self.active_metric_filter = None
         self.refresh_data()
 
     def _load_filter_options(self):
@@ -214,6 +326,24 @@ class MainWindow(QMainWindow):
             pass
 
     def refresh_data(self):
+        # 1. Dynamically compute and display metrics from database
+        try:
+            metrics = database.get_dashboard_metrics(self.db_path)
+            if hasattr(self, "metric_cards"):
+                self.metric_cards["all"].set_count(metrics.get("total_records", 0))
+                self.metric_cards["pending_atr"].set_count(metrics.get("pending_atr", 0))
+                self.metric_cards["under_process"].set_count(metrics.get("under_process", 0))
+                self.metric_cards["reply_received"].set_count(metrics.get("reply_received", 0))
+                self.metric_cards["closed_resolved"].set_count(metrics.get("closed_resolved", 0))
+
+                for k, card in self.metric_cards.items():
+                    card.set_active(
+                        k == self.active_metric_filter or (self.active_metric_filter is None and k == "all")
+                    )
+        except Exception as e:
+            print(f"Error calculating dashboard metrics: {e}")
+
+        # 2. Apply search and filters
         search_query = self.search_input.text().strip() or None
         filters = {}
 
@@ -229,13 +359,25 @@ class MainWindow(QMainWindow):
         if dept:
             filters["concerned_department"] = dept
 
+        if getattr(self, "active_metric_filter", None):
+            filters["atr_category"] = self.active_metric_filter
+
         try:
             records = database.get_representations(self.db_path, search_query=search_query, filters=filters)
             self.current_records = records
             self.table_model.set_data(records)
 
             total_in_db = database.count_representations(self.db_path)
-            self.count_status_lbl.setText(f"Showing {len(records)} of {total_in_db} records")
+            filter_note = ""
+            if self.active_metric_filter:
+                titles = {
+                    "pending_atr": "Pending ATR",
+                    "under_process": "Under Process",
+                    "reply_received": "Reply Received",
+                    "closed_resolved": "Closed / Resolved",
+                }
+                filter_note = f" (Filtered by: {titles.get(self.active_metric_filter, self.active_metric_filter)})"
+            self.count_status_lbl.setText(f"Showing {len(records)} of {total_in_db} records{filter_note}")
 
             # Apply column widths
             self._adjust_column_widths()
