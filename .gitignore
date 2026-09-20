@@ -25,3 +25,10 @@ app_config.json
 .env
 .vscode/
 .idea/
+
+# PyInstaller / Packaging artifacts
+build/
+dist/
+**/build/
+**/dist/
+
