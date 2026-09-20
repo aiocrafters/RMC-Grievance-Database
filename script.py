@@ -563,24 +563,27 @@ def main():
     df_dept.to_csv(dept_csv_path, index=False, encoding="utf-8-sig", quoting=csv.QUOTE_NONNUMERIC)
 
     # 3. Output Excel file with two sheets
-    with pd.ExcelWriter(excel_out_path, engine="openpyxl") as writer:
-        df_rep.to_excel(writer, sheet_name="Representations", index=False)
-        df_dept.to_excel(writer, sheet_name="Concerned Departments", index=False)
+    try:
+        with pd.ExcelWriter(excel_out_path, engine="openpyxl") as writer:
+            df_rep.to_excel(writer, sheet_name="Representations", index=False)
+            df_dept.to_excel(writer, sheet_name="Concerned Departments", index=False)
 
-        try:
-            from openpyxl.styles import Alignment
-            ws_rep = writer.sheets["Representations"]
-            col_idx = None
-            for cell in ws_rep[1]:
-                if cell.value == "Concerned Department(s)":
-                    col_idx = cell.column
-                    break
-            if col_idx:
-                for row in ws_rep.iter_rows(min_row=2, min_col=col_idx, max_col=col_idx):
-                    for cell in row:
-                        cell.alignment = Alignment(wrap_text=True, vertical="top")
-        except Exception as e:
-            print(f"Warning: Failed to apply Excel text wrapping ({e})")
+            try:
+                from openpyxl.styles import Alignment
+                ws_rep = writer.sheets["Representations"]
+                col_idx = None
+                for cell in ws_rep[1]:
+                    if cell.value == "Concerned Department(s)":
+                        col_idx = cell.column
+                        break
+                if col_idx:
+                    for row in ws_rep.iter_rows(min_row=2, min_col=col_idx, max_col=col_idx):
+                        for cell in row:
+                            cell.alignment = Alignment(wrap_text=True, vertical="top")
+            except Exception as e:
+                print(f"Warning: Failed to apply Excel text wrapping ({e})")
+    except PermissionError:
+        print(f"\n[Warning] Could not update Excel file '{excel_out_path.name}' because it is currently open in another program (e.g. Microsoft Excel). Close the file to allow updating.")
 
     print("\n" + "=" * 50)
     print("Processing & Normalization Completed Successfully")

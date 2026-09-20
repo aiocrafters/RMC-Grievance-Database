@@ -17,28 +17,26 @@ The pipeline ingests raw export files (`.xlsx`, `.xls`, `.csv`), performs intell
 
 ```text
 .
-├── app.py                             # Desktop application entry point (PySide6 / Qt6)
-├── config.py                          # Local database configuration & persistence
-├── database.py                        # SQLite schema, queries, cascade deletions & CRUD
-├── core_logic.py                      # Data extraction, subject regex parsing, department resolver
-├── import_export.py                   # Importer (CSV/Excel) and Exporters (CSV, Excel, PDF)
+├── Desktop Application/               # Dedicated standalone Desktop Application (PySide6 / Qt6)
+│   ├── app.py                         # Desktop app entry point
+│   ├── config.py                      # Local database configuration & persistence
+│   ├── database.py                    # SQLite schema, queries, cascade deletions & CRUD
+│   ├── core_logic.py                  # Extraction, regex parsing, department resolver
+│   ├── import_export.py               # Importers (CSV/Excel) and Exporters (CSV, Excel, PDF)
+│   ├── mappings.py                    # Schema mappings and default static values
+│   ├── README.md                      # Dedicated Desktop Application guide
+│   └── ui/                            # Graphical user interface components
+│       ├── main_window.py             # Main dashboard, search/filter controls, table view
+│       ├── table_model.py             # QAbstractTableModel for fast tabular rendering
+│       ├── action_delegate.py         # Custom delegate for three-dot (⋮) Actions menu
+│       └── dialogs/                   # Dialogs for ATR, Edit, Import, Export, and DB setup
+├── input/                             # Incoming raw grievance files (.xlsx, .xls, .csv)
+├── output/                            # Extracted and normalized output files
 ├── mappings.py                        # Output schemas, default values, and department mappings
-├── script.py                          # Standalone CLI batch extractor
+├── script.py                          # Original CLI batch extractor pipeline
 ├── requirements.txt                   # Project dependencies (PySide6, reportlab, pandas, openpyxl)
 ├── .gitignore                         # Excludes data files, virtual envs, and pycache
-├── README.md                          # Project documentation
-├── input/                             # Place raw incoming export files here
-├── output/                            # Generated normalized output files
-└── ui/                                # Desktop graphical user interface
-    ├── main_window.py                 # Main dashboard, search/filter controls, table view
-    ├── table_model.py                 # QAbstractTableModel for fast tabular rendering
-    ├── action_delegate.py             # Custom delegate for three-dot (⋮) Actions menu
-    └── dialogs/
-        ├── db_location_dialog.py      # Dialog to configure/change database storage folder
-        ├── representation_dialog.py   # Dialog to Add/Edit representations & departments
-        ├── atr_dialog.py              # Dialog for ATR management and status recalculation
-        ├── import_dialog.py           # Background import dialog with progress and summary
-        └── export_dialog.py           # Export dialog for CSV, Excel (.xlsx), and PDF
+└── README.md                          # Main project documentation
 ```
 
 ---

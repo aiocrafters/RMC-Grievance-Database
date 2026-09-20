@@ -2,6 +2,11 @@ import os
 import sys
 from pathlib import Path
 
+# Ensure Desktop Application folder is on Python path
+app_dir = Path(__file__).resolve().parent
+if str(app_dir) not in sys.path:
+    sys.path.insert(0, str(app_dir))
+
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFont, QPalette
 from PySide6.QtWidgets import QApplication
